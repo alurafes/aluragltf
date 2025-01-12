@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cjson/cJSON.h>
-#include "vector.h"
 
+#define AGLTF_MAGIC 0x46546C67
 #define AGLTF_CHUNK_TYPE_JSON 0x4E4F534A
 #define AGLTF_CHUNK_TYPE_BIN 0x004E4942
 
@@ -37,12 +37,48 @@ typedef enum agltf_json_accessor_type_t {
     AGLTF_JSON_ACCESSOR_TYPE_UNKNOWN
 } agltf_json_accessor_type_t;
 
+static uint8_t get_accessor_type_number_of_componenets(agltf_json_accessor_type_t type)
+{
+    switch (type)
+    {
+        case AGLTF_JSON_ACCESSOR_TYPE_SCALAR: return 1;
+        case AGLTF_JSON_ACCESSOR_TYPE_VEC2: return 2;
+        case AGLTF_JSON_ACCESSOR_TYPE_VEC3: return 3;
+        case AGLTF_JSON_ACCESSOR_TYPE_VEC4: 
+        case AGLTF_JSON_ACCESSOR_TYPE_MAT2: return 4;
+        case AGLTF_JSON_ACCESSOR_TYPE_MAT3: return 9;
+        case AGLTF_JSON_ACCESSOR_TYPE_MAT4: return 16;
+        default: return 0;
+    }
+}
+
+static uint8_t get_component_type_element_size(agltf_json_component_type_t type)
+{
+    switch (type)
+    {
+        case AGLTF_JSON_COMPONENT_TYPE_SIGNED_BYTE: return sizeof(char);
+        case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_BYTE: return sizeof(unsigned char);
+        case AGLTF_JSON_COMPONENT_TYPE_SIGNED_SHORT: return sizeof(int16_t);
+        case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_SHORT: return sizeof(uint16_t);
+        case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_INT: return sizeof(uint32_t);
+        case AGLTF_JSON_COMPONENT_TYPE_FLOAT: return sizeof(float);
+        default: return 0;
+    }
+}
+
+typedef struct agltf_accessor_data_t {
+    void* data;
+    size_t size;
+    uint8_t number_of_components;
+} agltf_accessor_data_t;
+
 typedef struct agltf_json_accessor_t {
     size_t index;
     agltf_json_buffer_view_t* buffer_view;
     agltf_json_component_type_t component_type;
     uint32_t count;
     agltf_json_accessor_type_t type;
+    agltf_accessor_data_t data;
 } agltf_json_accessor_t;
 
 typedef struct agltf_json_mesh_primitive_attribute_t {
@@ -111,7 +147,7 @@ int main()
 
     uint32_t magic;
     size_t read_bytes = fread(&magic, sizeof(magic), 1, glbFile);
-    if (magic != 0x46546C67)
+    if (magic != AGLTF_MAGIC)
     {
         return 1;
     }
@@ -266,75 +302,10 @@ int main()
     for (size_t i = 0; i < gltf_json.accessors_count; ++i)
     {
         agltf_json_accessor_t* accessor = &gltf_json.accessors[i];
-        printf("index %zu: %d\n", i, accessor->component_type);
-        switch (accessor->component_type)
-        {
-            case AGLTF_JSON_COMPONENT_TYPE_SIGNED_BYTE:
-            {
-                char* starting_point = (char*)&chunk_data[accessor->buffer_view->byte_offset];
-                char* ending_point = starting_point + accessor->count;
-                for (char* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_SIGNED_BYTE: %x\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_BYTE:
-            {
-                unsigned char* starting_point = (unsigned char*)&chunk_data[accessor->buffer_view->byte_offset];
-                unsigned char* ending_point = starting_point + accessor->count;
-                for (unsigned char* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_BYTE: %x\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            case AGLTF_JSON_COMPONENT_TYPE_SIGNED_SHORT:
-            {
-                int16_t* starting_point = (int16_t*)&chunk_data[accessor->buffer_view->byte_offset];
-                int16_t* ending_point = starting_point + accessor->count;
-                for (int16_t* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_SIGNED_SHORT: %d\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_SHORT:
-            {
-                uint16_t* starting_point = (uint16_t*)&chunk_data[accessor->buffer_view->byte_offset];
-                uint16_t* ending_point = starting_point + accessor->count;
-                for (uint16_t* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_SHORT: %d\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            case AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_INT:
-            {
-                uint32_t* starting_point = (uint32_t*)&chunk_data[accessor->buffer_view->byte_offset];
-                uint32_t* ending_point = starting_point + accessor->count;
-                for (uint32_t* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_UNSIGNED_INT: %d\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            case AGLTF_JSON_COMPONENT_TYPE_FLOAT:
-            {
-                float* starting_point = (float*)&chunk_data[accessor->buffer_view->byte_offset];
-                float* ending_point = starting_point + accessor->count;
-                for (float* current = starting_point; current != ending_point; ++current)
-                {
-                    printf("AGLTF_JSON_COMPONENT_TYPE_FLOAT: %f\n", *current);
-                }
-                goto after_accessor_switch;
-            }
-            default:
-            {
-                printf("unknown component type\n");
-            }
-        }
-after_accessor_switch:
+        accessor->data.number_of_components = get_accessor_type_number_of_componenets(accessor->type);
+        accessor->data.size = accessor->count * get_component_type_element_size(accessor->component_type);
+        accessor->data.data = malloc(accessor->data.size);
+        memcpy(accessor->data.data, &chunk_data[accessor->buffer_view->byte_offset], accessor->data.size);
     }
 
     // todo free all the stuff :D
